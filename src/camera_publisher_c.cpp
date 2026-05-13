@@ -200,7 +200,12 @@ public:
     compression_ = this->get_parameter("Compression").as_bool();
     std::string preview = this->get_parameter("preview").as_bool() ? "" : "-n";
     std::string vcam = std::to_string(this->get_parameter("VCam_num").as_int());
-    auto res = res_map_[this->get_parameter("mode").as_int()];
+    std::vector<std::string> res;
+    if (board == "rasp") {
+      res = res_map_[this->get_parameter("mode").as_int()];
+    } else {
+      res = res_map2_[this->get_parameter("mode").as_int()];
+    }
     std::string hflip = this->get_parameter("Hflip").as_bool() ? "--hflip" : "";
     std::string vflip = this->get_parameter("Vflip").as_bool() ? "--vflip" : "";
     com_format_ = this->get_parameter("format").as_int();
@@ -231,11 +236,15 @@ private:
     }
 
     if (board_ != "rasp") {
-      if (vflip_ == "--vflip") {
-        cv::flip(frame, frame, 0);
-      }
-      if (hflip_ == "--hflip") {
-        cv::flip(frame, frame, 1);
+      if (vflip_ == "--vflip" && hflip_ == "--hflip") {
+        cv::flip(frame, frame, -1);
+      } else {
+        if (vflip_ == "--vflip") {
+          cv::flip(frame, frame, 0);
+        }
+        if (hflip_ == "--hflip") {
+          cv::flip(frame, frame, 1);
+        }
       }
       if (prev_ == "") {
         cv::imshow("Preview - FPS: "+d_fps_, frame);

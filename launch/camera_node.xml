@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<launch>
+  <node pkg="cpp_camera" exec="camera_pub">
+    <param name="board" value="jorin" />
+    <param name="Compression" value="false" />
+    <param name="format" value="1" />
+    <param name="preview" value="false" />
+    <param name="mode" value="0" />
+    <param name="Vflip" value="true" />
+  </node>
+</launch>

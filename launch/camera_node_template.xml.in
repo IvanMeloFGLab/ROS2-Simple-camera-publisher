@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<launch>
+  <node pkg="cpp_camera" exec="camera_pub">
+    <param name="board" value="{{board}}" />
+    <param name="Compression" value="{{comp}}" />
+    <param name="format" value="{{format}}" />
+    <param name="preview" value="{{prev}}" />
+    <param name="mode" value="{{mode}}" />
+    <param name="fps" value="{{fps}}" />
+    <param name="Vflip" value="{{Vflip}}" />
+    <param name="Hflip" value="{{Hflip}}" />
+    <param name="JPEG_quality" value="{{jpeg}}" />
+    <param name="PNG_quality" value="{{png}}" />
+    <param name="WEBP_quality" value="{{webp}}" />
+  </node>
+</launch>
