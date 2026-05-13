@@ -35,6 +35,8 @@
 #include <rcl_interfaces/msg/parameter_event.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
+#include "fps_counter.h"
+
 using std::string;
 using std::vector;
 using std::shared_ptr;
@@ -110,6 +112,8 @@ private:
   int width_, heigh_, set_spc_;
   string images_path_, cam_node_name_, src_dir_;
   bool expanded_, comp_, reverse_done_;
+
+  std::shared_ptr<FPSCounter> fps_;
 
   std::chrono::time_point<std::chrono::high_resolution_clock> t_0_, t_i_;
   std::chrono::duration<double> t_;
