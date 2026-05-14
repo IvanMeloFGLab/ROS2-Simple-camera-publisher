@@ -763,7 +763,7 @@ void CameraWindow::onUpdate() {
 void CameraWindow::camUpdate() {
   if (expanded_) {
     cam_lbl_->setPixmap(QPixmap::fromImage(frame_).scaled(cam_lbl_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    prev_fps_lbl_->setText(QString("Receive FPS: %1").arg(round(100.0 * fps_->getFPS())/100.0));
+    prev_fps_lbl_->setText(QString("Receive FPS: %1").arg(fps_->getRoundedFPS(2)));
   }
 }
 

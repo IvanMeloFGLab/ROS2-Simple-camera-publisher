@@ -20,4 +20,9 @@ namespace cpp_camera {
     return 1.0/(sum_/ts_.size());
   }
 
+  double FPSCounter::getRoundedFPS(int decimals) {
+    return round(pow(10, decimals) * getFPS())/pow(10, decimals);
+  }
+
+
 }
