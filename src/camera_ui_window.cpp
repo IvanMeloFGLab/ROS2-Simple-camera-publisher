@@ -545,6 +545,8 @@ CameraWindow::CameraWindow(rclcpp::Node::SharedPtr& node_handle, rclcpp::Node::S
   connect(comp_cb_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &CameraWindow::onFormatChanged);
   connect(qual_spb_, &QSpinBox::editingFinished, this, &CameraWindow::onQualChanged);
 
+  fps_ = std::make_shared<FPSCounter>(60);
+
   RCLCPP_INFO(pns_->get_logger(), "Starting Camera Ui with node name %s.", pns_->get_fully_qualified_name());
 
   t_0_ = clk::now();
@@ -761,7 +763,7 @@ void CameraWindow::onUpdate() {
 void CameraWindow::camUpdate() {
   if (expanded_) {
     cam_lbl_->setPixmap(QPixmap::fromImage(frame_).scaled(cam_lbl_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    prev_fps_lbl_->setText(QString("Receive FPS: %1").arg(round(100.0 / t_.count())/100.0));
+    prev_fps_lbl_->setText(QString("Receive FPS: %1").arg(fps_->getRoundedFPS(2)));
   }
 }
 
@@ -789,6 +791,7 @@ rclcpp::Parameter CameraWindow::paramGet(string name) {
 void CameraWindow::rawImgCalb(const sensor_msgs::msg::Image::ConstSharedPtr msg){
   t_i_ = clk::now();
   t_ = t_i_ - t_0_;
+  fps_->addFrameTime(t_.count());
   QImage img(msg->data.data(), msg->width, msg->height, QImage::Format_RGB888);
   frame_ = img.rgbSwapped();
   t_0_ = t_i_;
@@ -797,6 +800,7 @@ void CameraWindow::rawImgCalb(const sensor_msgs::msg::Image::ConstSharedPtr msg)
 void CameraWindow::compImgCalb(const sensor_msgs::msg::CompressedImage::ConstSharedPtr msg){
   t_i_ = clk::now();
   t_ = t_i_ - t_0_;
+  fps_->addFrameTime(t_.count());
   cv::Mat raw_data(1, msg->data.size(), CV_8UC1, const_cast<unsigned char*>(msg->data.data()));
   cv::Mat frame = cv::imdecode(raw_data, cv::IMREAD_COLOR);
   QImage img(frame.data, frame.cols, frame.rows, frame.step, QImage::Format_RGB888);
@@ -806,10 +810,12 @@ void CameraWindow::compImgCalb(const sensor_msgs::msg::CompressedImage::ConstSha
 
 void CameraWindow::onFlipHChanged(int state) {
   param_setter_client_->set_parameters({rclcpp::Parameter("Hflip", state == Qt::Checked)});
+  param_setter_client_->set_parameters({rclcpp::Parameter("VCam_num", vcam_spb_->value())});
 }
 
 void CameraWindow::onFlipVChanged(int state) {
   param_setter_client_->set_parameters({rclcpp::Parameter("Vflip", state == Qt::Checked)});
+  param_setter_client_->set_parameters({rclcpp::Parameter("VCam_num", vcam_spb_->value())});
 }
 
 void CameraWindow::onVCamChanged() {

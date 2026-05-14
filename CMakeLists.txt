@@ -24,9 +24,11 @@ include_directories(include ${Qt5Widgets_INCLUDE_DIRS})
 set(camera_ui_node_SRCS
   src/camera_ui.cpp
   src/camera_ui_window.cpp
+  src/fps_counter.cpp
 )
 set(camera_ui_node_HDRS
   include/cpp_camera/camera_ui_window.h
+  include/cpp_camera/fps_counter.h
 )
 
 qt5_wrap_cpp(camera_ui_node_MOCS ${camera_ui_node_HDRS})
