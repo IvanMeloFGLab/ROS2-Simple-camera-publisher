@@ -4,6 +4,7 @@
 #include <rcl_interfaces/msg/integer_range.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/compressed_image.hpp>
+#include <sensor_msgs/msg/camera_info.hpp>
 #include <cv_bridge/cv_bridge.h>
 #include <opencv2/opencv.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -12,6 +13,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <cstdlib>
 
 #include <thread>
 #include <chrono>
@@ -88,8 +90,9 @@ class CameraPublisher : public rclcpp::Node {
 public:
   CameraPublisher()
   : Node("camera_publisher"), proc_(this->get_logger()) {
-    publisher_ = this->create_publisher<sensor_msgs::msg::Image>("/video_source/raw", 10);
-    com_publisher_ = this->create_publisher<sensor_msgs::msg::CompressedImage>("/video_source/compressed", 10);
+    publisher_ = this->create_publisher<sensor_msgs::msg::Image>("video_source/raw", 10);
+    com_publisher_ = this->create_publisher<sensor_msgs::msg::CompressedImage>("video_source/compressed", 10);
+    camera_info_pub_ = this->create_publisher<sensor_msgs::msg::CameraInfo>("/video_source/camera_info", 10);
 
     this->declare_parameter<std::string>("board", "jorin");
     this->declare_parameter<bool>("Compression", false);
@@ -120,6 +123,7 @@ public:
     this->declare_parameter<int>("fps", 30);
     this->declare_parameter<bool>("Hflip", false);
     this->declare_parameter<bool>("Vflip", true);
+    this->declare_parameter<bool>("calibration", false);
 
     rcl_interfaces::msg::ParameterDescriptor desc3;
     desc3.description = "JPEG_quality";
@@ -189,6 +193,45 @@ public:
     res_map2_[7] = {"3264", "2464", "21"};
 
     callback_handle_ = this->add_on_set_parameters_callback(std::bind(&CameraPublisher::parameters_callback, this, std::placeholders::_1));
+
+    conf_path_ = std::string(std::getenv("HOME")) + "/.ros/camera_info/default_cam.yaml";
+
+    if (!fs_.open(conf_path_, cv::FileStorage::READ)) {
+      RCLCPP_ERROR(this->get_logger(), "Failed to open YAML file, no image correction applied.");
+      calib_ = false;
+      calib_stup_ = false;
+    } else {
+      fs_["camera_matrix"]["data"] >> k_data_;
+      fs_["distortion_coefficients"]["data"] >> d_data_;
+
+      K_ = cv::Mat(3, 3, CV_64F, k_data_.data());
+      D_ = cv::Mat(d_data_);
+
+      fs_["image_width"] >> conf_w_;
+      fs_["image_height"] >> conf_h_;
+      RCLCPP_INFO(this->get_logger(), "Camera calibration reports: %dx%d", conf_w_, conf_h_);
+
+      fs_["rectification_matrix"]["data"] >> r_data_;
+      fs_["projection_matrix"]["data"] >> p_data_;
+      fs_["distortion_model"] >> dist_model_;
+
+      fs_.release();
+
+      rc_K_ = cv::getOptimalNewCameraMatrix(K_, D_, cv::Size(conf_w_, conf_h_), 1);
+      cv::initUndistortRectifyMap(K_, D_, cv::Mat(), rc_K_, cv::Size(conf_w_, conf_h_), CV_16SC2, map1_, map2_);
+
+      camera_info_msg_.width            = conf_w_;
+      camera_info_msg_.height           = conf_h_;
+      camera_info_msg_.distortion_model = dist_model_;
+      camera_info_msg_.d = d_data_;
+      std::copy(k_data_.begin(), k_data_.end(), camera_info_msg_.k.begin());
+      std::copy(r_data_.begin(), r_data_.end(), camera_info_msg_.r.begin());
+      std::copy(p_data_.begin(), p_data_.end(), camera_info_msg_.p.begin());
+
+      calib_ = true;
+      calib_stup_ = true;
+    }
+
   }
 
   ~CameraPublisher() {
@@ -198,6 +241,7 @@ public:
   bool init() {
     std::string board = this->get_parameter("board").as_string();
     compression_ = this->get_parameter("Compression").as_bool();
+    calib_param_ = this->get_parameter("calibration").as_bool();
     std::string preview = this->get_parameter("preview").as_bool() ? "" : "-n";
     std::string vcam = std::to_string(this->get_parameter("VCam_num").as_int());
     std::vector<std::string> res;
@@ -219,7 +263,7 @@ public:
     jpegxls_ = this->get_parameter("JPEGXL_speed").as_int();*/
 
     if (board != "rasp" && board != "jnano" && board != "jorin" && board != "PC") {
-      RCLCPP_ERROR(this->get_logger(), "La tarjeta no es compatible.");
+      RCLCPP_WARN(this->get_logger(), "La tarjeta no es compatible.");
       return false;
     };
 
@@ -233,6 +277,10 @@ private:
     if (!cap_.read(frame)) {
       RCLCPP_WARN(this->get_logger(), "No se pudo leer frame de la cámara.");
       return;
+    }
+
+    if (calib_ && calib_param_) {
+      cv::remap(frame, frame, map1_, map2_, cv::INTER_LINEAR);
     }
 
     if (board_ != "rasp") {
@@ -263,6 +311,7 @@ private:
       //double data_mb = static_cast<double>(data_bytes) / (1024.0 * 1024.0);
 
       //RCLCPP_INFO(this->get_logger(), "Image msg: %ux%u, encoding=%s, step=%u, data=%zu bytes (%.3f MB)", msg->width, msg->height, msg->encoding.c_str(), msg->step, data_bytes, data_mb);
+      camera_info_msg_.header.stamp = msg->header.stamp;
       publisher_->publish(*msg);
     } else {
       sensor_msgs::msg::CompressedImage cmsg;
@@ -311,7 +360,12 @@ private:
       //auto data_mb = static_cast<double>(data_bytes) / (1024.0 * 1024.0);
 
       //RCLCPP_INFO(this->get_logger(), "CompressedImage msg: data=%zu bytes (%.3f MB)", data_bytes, data_mb);
+      camera_info_msg_.header.stamp = cmsg.header.stamp;
       com_publisher_->publish(cmsg);
+    }
+
+    if (calib_stup_) {
+      camera_info_pub_->publish(camera_info_msg_);
     }
   }
 
@@ -321,6 +375,7 @@ private:
 
     std::string board = this->get_parameter("board").as_string();
     compression_ = this->get_parameter("Compression").as_bool();
+    calib_param_ = this->get_parameter("calibration").as_bool();
     std::string preview = this->get_parameter("preview").as_bool() ? "" : "-n";
     int mode = this->get_parameter("mode").as_int();
     std::string vcam = std::to_string(this->get_parameter("VCam_num").as_int());
@@ -373,6 +428,9 @@ private:
         result.reason = "Not available during runtime. :(";
       } else if (param.get_name() == "Compression") {
         compression_ = param.as_bool();
+        RCLCPP_INFO(this->get_logger(), "Starting compression.");
+      } else if (param.get_name() == "calibration") {
+        calib_param_ = param.as_bool();
         RCLCPP_INFO(this->get_logger(), "Starting compression.");
       } else if (param.get_name() == "format") {
         com_format_ = param.as_int();
@@ -467,6 +525,15 @@ private:
       double rh = cap_.get(cv::CAP_PROP_FRAME_HEIGHT);
       double rfps = cap_.get(cv::CAP_PROP_FPS);
 
+      if (calib_stup_) {
+        if (conf_w_ == stoi(width) && conf_h_ == stoi(height)) {
+          calib_ = true;
+        } else {
+          RCLCPP_WARN(this->get_logger(), "La resolución del archivo de calibración y la resolución actual de la cámara no coinciden.");
+          calib_ = false;
+        }
+      }
+
       RCLCPP_INFO(this->get_logger(), "Camera reports: %.0fx%.0f @ %.2f FPS", rw, rh, rfps);
     }
 
@@ -486,14 +553,19 @@ private:
 
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr publisher_;
   rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr com_publisher_;
+  rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_pub_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr callback_handle_;
+  sensor_msgs::msg::CameraInfo camera_info_msg_;
   rclcpp::TimerBase::SharedPtr timer_;
   cv::VideoCapture cap_;
-  std::string cmd_, board_, prev_, vflip_, hflip_, d_fps_;
-  bool compression_;
-  int com_format_, jpegq_, pngq_, webpq_, s_fps_;
+  std::string cmd_, board_, prev_, vflip_, hflip_, d_fps_, conf_path_, dist_model_;
+  bool compression_, calib_, calib_stup_, calib_param_;
+  int com_format_, jpegq_, pngq_, webpq_, s_fps_, conf_w_, conf_h_;
   ProcessGuard proc_;
   std::map<int, std::vector<std::string>> res_map_, res_map2_;
+  std::vector<double> k_data_, d_data_, r_data_, p_data_;
+  cv::FileStorage fs_;
+  cv::Mat D_, K_, map1_, map2_, rc_K_;
 };
 
 int main(int argc, char *argv[]) {
